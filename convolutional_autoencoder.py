@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 
 from models import *
 from mnist import MNIST  # this is the MNIST data manager that provides training/testing batches
+import pdb
 
 
 class ConvolutionalAutoencoder(object):
@@ -44,7 +45,7 @@ class ConvolutionalAutoencoder(object):
         self.loss = loss
         self.training = training
 
-    def train(self, batch_size, passes, new_training=True):
+    def train(self, batch_size, passes, new_training=True, classes=list(range(10))):
         """
 
         :param batch_size:
@@ -53,7 +54,6 @@ class ConvolutionalAutoencoder(object):
         :return:
         """
         mnist = MNIST()
-
         with tf.Session() as sess:
             # prepare session
             if new_training:
@@ -63,7 +63,7 @@ class ConvolutionalAutoencoder(object):
 
             # start training
             for step in range(1+global_step, 1+passes+global_step):
-                x, y = mnist.get_batch(batch_size)
+                x, y = mnist.get_batch(batch_size, classes=classes)
                 self.training.run(feed_dict={self.x: x})
 
                 if step % 10 == 0:
@@ -74,7 +74,7 @@ class ConvolutionalAutoencoder(object):
                     saver.save(sess, 'saver/cnn', global_step=step)
                     print('checkpoint saved')
 
-    def reconstruct(self):
+    def reconstruct(self, vis_weights=True, classes="all"):
         """
 
         """
@@ -96,34 +96,47 @@ class ConvolutionalAutoencoder(object):
             saver, global_step = Model.continue_previous_session(sess, ckpt_file='saver/checkpoint')
 
             # visualize weights
-            first_layer_weights = tf.get_default_graph().get_tensor_by_name("conv_1/kernel:0").eval()
-            grid_image = weights_to_grid(first_layer_weights, 4, 8)
+            if vis_weights:
+                first_layer_weights = tf.get_default_graph().get_tensor_by_name("conv_1/kernel:0").eval()
+                grid_image = weights_to_grid(first_layer_weights, 4, 8)
 
-            fig, ax0 = plt.subplots(ncols=1, figsize=(8, 4))
-            ax0.imshow(grid_image, cmap=plt.cm.gray, interpolation='nearest')
-            ax0.set_title('first conv layers weights')
-            plt.show()
+                fig, ax0 = plt.subplots(ncols=1, figsize=(8, 4))
+                ax0.imshow(grid_image, cmap=plt.cm.gray, interpolation='nearest')
+                ax0.set_title('first conv layers weights')
+                plt.show()
 
             # visualize results
             batch_size = 36
             x, y = mnist.get_batch(batch_size, dataset='testing')
             org, recon = sess.run((self.x, self.reconstruction), feed_dict={self.x: x})
 
+            diff = (org - recon).squeeze()
+            error = np.linalg.norm(diff, axis=(1, 2))
+
             input_images = weights_to_grid(org.transpose((1, 2, 3, 0)), 6, 6)
             recon_images = weights_to_grid(recon.transpose((1, 2, 3, 0)), 6, 6)
+            errors = np.reshape(error, (6, 6))
 
-            fig, (ax0, ax1) = plt.subplots(ncols=2, figsize=(10, 5))
+            fig, (ax0, ax1, ax2) = plt.subplots(ncols=3, figsize=(10, 5))
+            fig.suptitle("Trained with classes: {}".format(classes))
             ax0.imshow(input_images, cmap=plt.cm.gray, interpolation='nearest')
             ax0.set_title('input images')
             ax1.imshow(recon_images, cmap=plt.cm.gray, interpolation='nearest')
             ax1.set_title('reconstructed images')
+            shown = ax2.imshow(errors, cmap=plt.cm.inferno, interpolation='nearest')
+            plt.colorbar(shown, ax=ax2)
+            ax2.set_title('Errors')
             plt.show()
 
 
 def main():
+    CLASSES = [0, 8]
+    EPOCS   = 10000
+    TRAIN   = False
     conv_autoencoder = ConvolutionalAutoencoder()
-    # conv_autoencoder.train(batch_size=100, passes=100000, new_training=True)
-    conv_autoencoder.reconstruct()
+    if TRAIN:
+        conv_autoencoder.train(batch_size=100, passes=EPOCS, new_training=True, classes=CLASSES)
+    conv_autoencoder.reconstruct(False, classes=CLASSES)
 
 
 if __name__ == '__main__':

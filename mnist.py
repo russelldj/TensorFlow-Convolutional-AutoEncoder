@@ -1,6 +1,7 @@
 from matplotlib import pyplot as plt
 import numpy as np
 import os
+import pdb
 
 
 class MNIST(object):
@@ -60,7 +61,13 @@ class MNIST(object):
             key[label] = 1
         return keys
 
-    def get_batch(self, batch_size, dataset='training'):
+
+    @staticmethod
+    def to_catagorical(one_hot_labels):
+        return np.nonzero(one_hot_labels)[1]
+
+
+    def get_batch(self, batch_size, dataset='training', classes=[]):
         """
         get a batch of images and corresponding labels.
 
@@ -86,8 +93,16 @@ class MNIST(object):
             return
 
         num_samples = labels.shape[0]
-        idx = np.random.randint(num_samples, size=batch_size)
+        if classes != []:
+            catagorical_labels = self.to_catagorical(labels)
+            good_classes = np.isin(catagorical_labels, classes)
+            loc_of_good_classes = np.nonzero(good_classes)[0]
+            idx = np.random.randint(loc_of_good_classes.shape[0], size=batch_size)
+            idx = loc_of_good_classes[idx]
+        else:
+            idx = np.random.randint(num_samples, size=batch_size)
 
+            
         return images[idx], labels[idx]
 
 
