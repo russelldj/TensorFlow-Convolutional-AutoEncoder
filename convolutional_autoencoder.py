@@ -9,8 +9,10 @@ import cv2
 
 import lime
 from lime import lime_image
+from lime.wrappers.scikit_image import SegmentationAlgorithm
 import skimage.segmentation as seg
 import sklearn.manifold
+from skimage.color import gray2rgb, rgb2gray, label2rgb
 
 class ConvolutionalAutoencoder(object):
     """
@@ -50,6 +52,9 @@ class ConvolutionalAutoencoder(object):
         self.reconstruction = reconstruction
         self.loss = loss
         self.training = training
+        self.mean_feature = None
+        self.mean_error = None
+
 
     def train(self, batch_size, passes, new_training=True, classes=list(range(10))):
         """
@@ -193,9 +198,31 @@ class ConvolutionalAutoencoder(object):
         ax3.imshow(reconstructed[47][..., 0])
         #ax4.imshow(np.abs(images[47] - reconstructed[47])[...,0])
         plt.show()
-        exit()
 
-    #def compute_dist(self):
+    def compute_dist(self, input_image, expand_dims=False):
+        print(input_image.shape)
+        input_image = input_image[...,0:1]
+        if expand_dims:
+            input_image = np.expand_dims(input_image, axis=0)
+        with tf.Session() as sess:
+            saver, global_step = Model.continue_previous_session(sess, ckpt_file='saver/checkpoint')
+            features = sess.run((self.encoded), feed_dict={self.x: input_image})
+        #error = np.linalg.norm(self.mean_feature - feature)
+        class_probs = [self.return_probs_dists(f) for f in features]
+        print(class_probs)
+        return class_probs
+
+
+    def compute_mean(self, classes):
+        # run a bunch of normal data
+        mnist = MNIST()
+        images, labels = mnist.get_batch(300, dataset='training', classes=classes)
+
+        features = self.get_features(images)
+        self.mean_feature = np.mean(features, axis = 0)
+        diffs_from_mean = features - self.mean_feature
+        errors = np.linalg.norm(diffs_from_mean, axis=1)
+        self.mean_error = np.mean(errors)
 
 
     def decode_features(self, features, images):
@@ -208,11 +235,16 @@ class ConvolutionalAutoencoder(object):
     def return_probs(self, org, recon):
         error = np.linalg.norm(org - recon)
         scaled = min(error / 10.0, 1)
+        return [1 - scaled, scaled] # not anomolous
+
+
+    def return_probs_dists(self, feature):
+        error = np.linalg.norm(feature - self.mean_feature)
+        self.alpha = 3
+        scaled = min(error / (self.mean_error * self.alpha), 1)
         return [1 - scaled, scaled]
 
-
     def test_compute_error(self, classes):
-
         mnist = MNIST()
         xin, _ = mnist.get_batch(30, dataset='testing', classes=classes)
         xout, _ = mnist.get_batch(6, dataset='testing', classes=[x for x in range(10) if x not in classes])
@@ -246,6 +278,8 @@ def lime(model):
     #process image
     mnist = MNIST()
     image, label = mnist.get_batch(1, dataset='testing')
+    label = np.nonzero(label)[1][0]
+    print('label', label)
     image = image[0]
     image = np.concatenate((image, image, image), axis=2)
     print(image.shape)
@@ -254,19 +288,31 @@ def lime(model):
     plt.imshow(np.squeeze(image) / 2 +0.5)
     plt.show()
 
-    print(model.compute_error(image, expand_dims=True))
+    print(model.compute_dist(image, True))
 
     #Explain
     explainer = lime_image.LimeImageExplainer()
-    explanation = explainer.explain_instance(image, model.compute_error, top_labels=2)
+    segmenter = SegmentationAlgorithm('quickshift', kernel_size=1, max_dist=200, ratio=0.2)
+    explanation = explainer.explain_instance(image, model.compute_dist, top_labels=2, num_samples=100, segmentation_fn=segmenter)
     print(explanation)
 
     #Show superpixels
-    temp, mask = explanation.get_image_and_mask(explanation.top_labels[0], positive_only=True, hide_rest=True)
+    CLASS = 1
+    #https://github.com/marcotcr/lime/blob/master/doc/notebooks/Tutorial%20-%20MNIST%20and%20RF.ipynb
+    temp, mask = explanation.get_image_and_mask(CLASS, positive_only=True, hide_rest=True)
     #pdb.set_trace()
     print('Print superpixels:')
-    marked = seg.mark_boundaries(temp/ 2 +0.5, mask).astype(np.uint8)
-    plt.imshow(marked)
+    #marked = seg.mark_boundaries(temp/ 2 +0.5, mask) #.astype(np.uint8)
+
+    fig, (ax1, ax2) = plt.subplots(1,2, figsize = (8, 4))
+    ax1.imshow(label2rgb(mask,temp, bg_label = 0), interpolation = 'nearest')
+    ax1.set_title('Positive Regions for {}'.format(CLASS))
+    temp, mask = explanation.get_image_and_mask(CLASS, positive_only=False, num_features=10, hide_rest=False, min_weight = 0.01)
+    ax2.imshow(label2rgb(3-mask,temp, bg_label = 0), interpolation = 'nearest')
+    ax2.set_title('Positive/Negative Regions for {}'.format(CLASS))
+
+
+    #plt.imshow(marked)
     plt.show()
 
 def main():
@@ -277,12 +323,16 @@ def main():
     #lime(conv_autoencoder)
     if TRAIN:
         conv_autoencoder.train(batch_size=100, passes=EPOCS, new_training=True, classes=CLASSES)
-    conv_autoencoder.test_features(list(range(10)))
+
+    conv_autoencoder.compute_mean(CLASSES)
+    print(conv_autoencoder.mean_feature)
+    #conv_autoencoder.test_features(list(range(10)))
     #pdb.set_trace()
     #conv_autoencoder.get_features()
-    conv_autoencoder.test_compute_error(classes=CLASSES)
-    error = conv_autoencoder.compute_error(np.zeros((28,28,1), dtype=np.uint8), expand_dims=True)
-    print('error', error)
+    #conv_autoencoder.test_compute_error(classes=CLASSES)
+    #error = conv_autoencoder.compute_error(np.zeros((28,28,1), dtype=np.uint8), expand_dims=True)
+    #print('error', error)
+    lime(conv_autoencoder)
     #conv_autoencoder.reconstruct(False, classes=CLASSES)
 
 
