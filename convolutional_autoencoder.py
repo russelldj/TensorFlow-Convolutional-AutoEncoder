@@ -10,6 +10,7 @@ import cv2
 import lime
 from lime import lime_image
 import skimage.segmentation as seg
+import sklearn.manifold
 
 class ConvolutionalAutoencoder(object):
     """
@@ -45,6 +46,7 @@ class ConvolutionalAutoencoder(object):
 
         #
         self.x = x
+        self.encoded = encoded
         self.reconstruction = reconstruction
         self.loss = loss
         self.training = training
@@ -161,6 +163,32 @@ class ConvolutionalAutoencoder(object):
         class_probs =[self.return_probs(x, y) for x, y in zip(org, recon)]
         return class_probs
 
+    def get_features(self, input_image, expand_dims=False):
+        print(input_image.shape)
+        input_image = input_image[...,0:1]
+        if expand_dims:
+            input_image = np.expand_dims(input_image, axis=0)
+        with tf.Session() as sess:
+            saver, global_step = Model.continue_previous_session(sess, ckpt_file='saver/checkpoint')
+            feature = sess.run((self.encoded), feed_dict={self.x: input_image})
+
+        return feature
+
+
+    def test_features(self, classes=[0]):
+        mnist = MNIST()
+        images, labels = mnist.get_batch(3000, dataset='testing', classes=classes)
+        labels = np.nonzero(labels)[1]
+        features = self.get_features(images)
+        tsne = sklearn.manifold.TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300)
+        tsne_results = tsne.fit_transform(features)
+        for i in classes:
+            matching = labels == i
+            plt.scatter(tsne_results[matching, 0], tsne_results[matching, 1])
+        plt.legend([str(i) for i in classes])
+        plt.show()
+
+
     def return_probs(self, org, recon):
         error = np.linalg.norm(org - recon)
         scaled = min(error / 10.0, 1)
@@ -177,8 +205,7 @@ class ConvolutionalAutoencoder(object):
         np.random.shuffle(x)
         errors = []
         for img in x:
-            errors.append(self.compute_error(img, expand_dims=True))
-
+            errors.append(self.compute_error(img, expand_dims=True)[0][1]) # prob of anomalous
         top_k_error = np.sort(errors)[-6]
         errors = np.reshape(errors, (6,6))
 
@@ -195,6 +222,7 @@ class ConvolutionalAutoencoder(object):
         ax1.set_title('Errors')
 
         plt.show()
+
 
 
 def lime(model):
@@ -228,11 +256,14 @@ def lime(model):
 def main():
     CLASSES = [0]
     EPOCS   = 1000
-    TRAIN   = False
+    TRAIN   = True
     conv_autoencoder = ConvolutionalAutoencoder()
-    lime(conv_autoencoder)
+    #lime(conv_autoencoder)
     if TRAIN:
         conv_autoencoder.train(batch_size=100, passes=EPOCS, new_training=True, classes=CLASSES)
+    conv_autoencoder.test_features(CLASSES)
+    pdb.set_trace()
+    #conv_autoencoder.get_features()
     conv_autoencoder.test_compute_error(classes=CLASSES)
     error = conv_autoencoder.compute_error(np.zeros((28,28,1), dtype=np.uint8), expand_dims=True)
     print('error', error)
