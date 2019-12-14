@@ -29,7 +29,7 @@ class ConvolutionalAutoencoder(object):
         conv2 = Convolution2D([5, 5, 32, 32], activation=tf.nn.relu, scope='conv_2')(pool1)
         pool2 = MaxPooling(kernel_shape=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME', scope='pool_2')(conv2)
         unfold = Unfold(scope='unfold')(pool2)
-        encoded = FullyConnected(20, activation=tf.nn.relu, scope='encode')(unfold)
+        encoded = tf.placeholder_with_default(FullyConnected(20, activation=tf.nn.relu, scope='encode')(unfold), shape=[None, 20])
         # decode
         decoded = FullyConnected(7*7*32, activation=tf.nn.relu, scope='decode')(encoded)
         fold = Fold([-1, 7, 7, 32], scope='fold')(decoded)
@@ -177,16 +177,32 @@ class ConvolutionalAutoencoder(object):
 
     def test_features(self, classes=[0]):
         mnist = MNIST()
-        images, labels = mnist.get_batch(3000, dataset='testing', classes=classes)
+        images, labels = mnist.get_batch(300, dataset='testing', classes=classes)
         labels = np.nonzero(labels)[1]
         features = self.get_features(images)
         tsne = sklearn.manifold.TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300)
         tsne_results = tsne.fit_transform(features)
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
         for i in classes:
             matching = labels == i
-            plt.scatter(tsne_results[matching, 0], tsne_results[matching, 1])
-        plt.legend([str(i) for i in classes])
+            ax1.scatter(tsne_results[matching, 0], tsne_results[matching, 1])
+        ax1.legend([str(i) for i in classes])
+        ax1.scatter(tsne_results[47, 0], tsne_results[47, 1], s=200, c='k', marker='X')
+        ax2.imshow(images[47][..., 0])
+        reconstructed = self.decode_features(features, images)
+        ax3.imshow(reconstructed[47][..., 0])
+        #ax4.imshow(np.abs(images[47] - reconstructed[47])[...,0])
         plt.show()
+        exit()
+
+    #def compute_dist(self):
+
+
+    def decode_features(self, features, images):
+        with tf.Session() as sess:
+            saver, global_step = Model.continue_previous_session(sess, ckpt_file='saver/checkpoint')
+            reconstructed = sess.run((self.reconstruction), feed_dict={self.x : images, self.encoded: features})
+        return reconstructed
 
 
     def return_probs(self, org, recon):
@@ -256,13 +272,13 @@ def lime(model):
 def main():
     CLASSES = [0]
     EPOCS   = 1000
-    TRAIN   = True
+    TRAIN   = False
     conv_autoencoder = ConvolutionalAutoencoder()
     #lime(conv_autoencoder)
     if TRAIN:
         conv_autoencoder.train(batch_size=100, passes=EPOCS, new_training=True, classes=CLASSES)
-    conv_autoencoder.test_features(CLASSES)
-    pdb.set_trace()
+    conv_autoencoder.test_features(list(range(10)))
+    #pdb.set_trace()
     #conv_autoencoder.get_features()
     conv_autoencoder.test_compute_error(classes=CLASSES)
     error = conv_autoencoder.compute_error(np.zeros((28,28,1), dtype=np.uint8), expand_dims=True)
